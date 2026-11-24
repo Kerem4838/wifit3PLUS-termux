@@ -1,8 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-REPO=https://github.com/OliverRhyme/wifit3-termux
-API=https://api.github.com/repos/OliverRhyme/wifit3-termux/releases/latest
+REPO=https://github.com/Kerem4838/wifit3PLUS-termux
+API=https://api.github.com/repos/Kerem4838/wifit3PLUS-termux/releases/latest
 FALLBACK="$REPO/archive/refs/heads/termux-port.tar.gz"
 
 command -v pkg >/dev/null || { echo "Run this inside Termux." >&2; exit 1; }
