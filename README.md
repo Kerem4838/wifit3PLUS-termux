@@ -1,18 +1,32 @@
-# wifit3
-> A standalone USB Wi-Fi auditor for Linux, Windows, macOS, and Android (via Termux).
+# wifit3PLUS (Termux)
+> A standalone USB Wi-Fi auditor for Android (via Termux), Linux, Windows, and macOS — extended with Probe Scanner, Tier List, Vault Probes, Known AP Memory, and Client Nicknames.
 
-> **Termux fork of [derv82/wifit3](https://github.com/derv82/wifit3).** Upstream is pulled in
-> continuously; Termux-specific changes live on the `termux-port` branch.
+> **100% Vibecoded:** Every custom feature in **wifit3PLUS** (`custom 0.4.2`) was built completely through vibecoding on top of the `termux-port` base (`0.7.1+termux.1`).
 >
-> **Versioning:** fork releases are tagged `v<upstream>+termux.<n>` (for example
-> `v0.7.0+termux.1`), where `<upstream>` is the derv82/wifit3 version the fork is based on and
-> `<n>` counts fork releases on that base.
+> **Versioning:** `wifit3 --version` reports `wifit3 0.7.1+termux.1 (custom 0.4.2)`.
 
 <p align="center">
   <img src="assets/wifit3-1-splash.png" alt="wifit3 splash / adapter picker" width="700">
 </p>
 
 > *At least* one of the [supported USB adapters](#supported-hardware) is **required**.
+
+## What's New in wifit3PLUS (`custom 0.4.2`)
+
+- **Live Passive Probe Scanner (`r` or `Probes` button):**
+  - Captures 802.11 Probe Requests and `(Re)Assoc Req` SSIDs in real time with an `airodump-ng`-style `PROBES` column and multi-card RSSI tracking.
+  - Detects Android/iOS/OS **Randomized MACs**, with one-key cycling (`m`: All / Real / Random), split-table mode (`g`), and `Named Only` filtering (`n`).
+  - Clickable column headers + `s`/`o` sorting, floating mouse-hover popup showing full probed SSIDs, reverse **SSIDs View** (`t`), and UTF-8 CSV export (`e`).
+- **Most Probed SSIDs — Tier List:**
+  - Live bottom leaderboard ranking the most frequently probed SSIDs with separate **Real vs. Random** client/request counts and live/saved matching AP BSSID & router model.
+- **Vault Probes (`captures/probes.json`):**
+  - Dedicated `Probes` tab inside Vault (`p` to toggle APs / Probes) with `ALL`, `REAL MAC`, and `RANDOM MAC` tabs, search, CSV export, and delete/clear controls.
+- **Persistent Client Nicknames (`n` in Vault / `r` in Probe Scanner):**
+  - Name any client MAC persistently; nicknames appear across Vault Probes, live Probe Scanner (tables, hover popups, details, search), `FocusViewV2`'s Clients list, and CSV exports.
+- **Known AP Memory (`captures/known_aps.json`):**
+  - Automatically remembers `BSSID -> SSID` and OUI/WSC router models across restarts in both the main Scanner and Probe Scanner.
+- **Double-Click / Enter Focus & Client Tagging:**
+  - Double-clicking or pressing `Enter` on an associated client in Probe Scanner or Vault Probes jumps directly to `FocusViewV2` on its AP and highlights that client (`★`).
 
 ## Why?
 * **Cross-Platform:** Runs identically on Linux, macOS, Windows, and Android (via Termux).
@@ -94,8 +108,8 @@ Breakdown of each device's capabilities and limitations: [Supported Hardware Doc
 
 ## Installation & Running
 
-### Option 1: Download Prebuilt Binaries (Recommended)
-Download the latest standalone executable from [**Releases**](https://github.com/derv82/wifit3/releases/latest):
+### Option 1: Download Prebuilt Binaries / Releases
+Download releases from [**Releases**](https://github.com/Kerem4838/wifit3PLUS-termux/releases/latest):
 
 * **Windows:** Download and run `wifit3-windows-x64.exe`.
 * **Linux x64 (non-sudo):** `chmod +x wifit3-linux-x64 && ./wifit3-linux-x64`
@@ -106,21 +120,23 @@ Download the latest standalone executable from [**Releases**](https://github.com
   chmod +x wifit3-macos-universal2
   ./wifit3-macos-universal2
   ```
-* **Android (Termux):** no executable; this fork's [Releases](https://github.com/OliverRhyme/wifit3-termux/releases/latest) also ship a prebuilt wheel. Install the **Termux:API app** from F-Droid or Google Play (the `termux-api` package alone is not enough).
+* **Android (Termux):** Install the **Termux:API app** from F-Droid or Google Play (the `termux-api` package alone is not enough).
   ```bash
   pkg install python libusb termux-api
-  pip install wifit3-<version>-py3-none-any.whl   # downloaded from the fork's Releases
+  pip install wifit3-<version>-py3-none-any.whl   # if downloaded from Releases
   wifit3
   ```
-  Or install the latest release directly:
+  Or install directly:
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/OliverRhyme/wifit3-termux/termux-port/scripts/termux/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Kerem4838/wifit3PLUS-termux/termux-port/scripts/termux/install.sh | bash
   ```
   See [Running in Termux](docs/TERMUX.md).
 
-### Option 2: Run from Source
+### Option 2: Run from Source (Recommended for wifit3PLUS)
 wifit3 uses Astral's [`uv`](https://docs.astral.sh/uv/). `sync` sets up dependencies:
 ```bash
+git clone https://github.com/Kerem4838/wifit3PLUS-termux.git
+cd wifit3PLUS-termux
 uv sync
 uv run wifit3
 ```
@@ -128,12 +144,12 @@ uv run wifit3
 **Android (Termux):**
 ```bash
 pkg install python libusb termux-api git uv
-git clone https://github.com/OliverRhyme/wifit3-termux
-cd wifit3-termux
+git clone https://github.com/Kerem4838/wifit3PLUS-termux.git
+cd wifit3PLUS-termux
 uv sync --no-dev
 uv run --no-dev wifit3
 ```
-Install the **Termux:API app** from F-Droid or Google Play as well; the `termux-api` package is only the client. Use `--no-dev`: the dev group includes PyInstaller, which doesn't build on Termux. Python 3.13+ skips `libusb-package`; older Pythons can use the prebuilt wheel above or `uv sync --no-dev --no-install-package libusb-package`. See [Running in Termux](docs/TERMUX.md) for the USB setup.
+Install the **Termux:API app** from F-Droid or Google Play as well; the `termux-api` package is only the client. Use `--no-dev`: the dev group includes PyInstaller, which doesn't build on Termux. Python 3.13+ skips `libusb-package`; older Pythons can use `uv sync --no-dev --no-install-package libusb-package`. See [Running in Termux](docs/TERMUX.md) for the USB setup.
 
 ### Option 3: Build your own binary
 ```bash
@@ -142,7 +158,7 @@ uv run pyinstaller wifit3.spec --noconfirm --clean
 Binary executable is written to `dist/` subdirectory.
 
 ### Android (Termux, no root)
-[@OliverRhyme](https://github.com/OliverRhyme) maintains [**wifit3-termux**](https://github.com/OliverRhyme/wifit3-termux), a native Termux port: no root, proot or VM. It uses `termux-usb` and asks Android for permission when a card is plugged in. Install steps are in its README.
+[**wifit3PLUS-termux**](https://github.com/Kerem4838/wifit3PLUS-termux) runs natively on Android via Termux: no root, proot, or VM required. It uses `termux-usb` and asks Android for permission when a card is plugged in. See [docs/TERMUX.md](docs/TERMUX.md).
 
 ## One-Time Driver Setup
 
@@ -180,11 +196,11 @@ The full list is in **[CREDITS.md](docs/CREDITS.md)**.
 
 ## How it Works: Mini-Drivers
 
-wifit3 bypasses the operating system's native Wi-Fi stack entirely. It ships with lightweight Python ports of Linux kernel drivers ([src/wifit3/chips/\*](https://github.com/derv82/wifit3/tree/master/src/wifit3/chips)) that directly control wireless devices over USB bulk and control transfers.
+wifit3 bypasses the operating system's native Wi-Fi stack entirely. It ships with lightweight Python ports of Linux kernel drivers ([src/wifit3/chips/\*](https://github.com/Kerem4838/wifit3PLUS-termux/tree/termux-port/src/wifit3/chips)) that directly control wireless devices over USB bulk and control transfers.
 
 Because register-level frame injection and monitor mode are performed entirely in user space, Windows NDIS restrictions and Linux kernel driver locking do not apply.
 
-For how a driver is ported from the Linux source and checked against a USB capture of the Linux driver, see the [Porting Documentation](https://github.com/derv82/wifit3/blob/master/docs/porting/METHODOLOGY.md).
+For how a driver is ported from the Linux source and checked against a USB capture of the Linux driver, see the [Porting Documentation](https://github.com/Kerem4838/wifit3PLUS-termux/blob/termux-port/docs/porting/METHODOLOGY.md).
 
 ## License & Disclaimer
 
