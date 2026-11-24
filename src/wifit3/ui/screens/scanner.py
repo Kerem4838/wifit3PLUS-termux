@@ -9,7 +9,7 @@ from textual.reactive import Reactive
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.timer import Timer
-from textual.widgets import Footer, Header, RichLog, Static
+from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 from textual.widgets._header import HeaderClock, HeaderIcon, HeaderTitle
 from rich.markup import escape
 from rich.text import Text
@@ -156,6 +156,7 @@ class ScannerView(Screen):
     ScannerView.-medium #filter-power-short-label,
     ScannerView.-large #filter-power-short-label { display: block; }
     ScannerView #filter-open-probes { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
+    ScannerView #filter-jam-all { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
     """
 
     BINDINGS = [
@@ -169,6 +170,7 @@ class ScannerView(Screen):
         Binding("/", "focus_filter", "Filter", show=False),
         Binding("l", "toggle_log", "Toggle Log", show=True),
         Binding("w", "wps_pbc_mode", "WPS PBC", show=True),
+        Binding("j", "jam_all", "Jam All", show=True, priority=True),
         Binding("r", "open_probes", "Probes", show=True),
         Binding("v", "open_vault", "Vault", show=True),
         Binding("home", "scroll_home", "Top", show=False, priority=True),
@@ -231,6 +233,7 @@ class ScannerView(Screen):
             rows.append("[yellow]No active interface[/yellow]")
         for i, row in enumerate(rows):
             self._write_log(treelog.leaf(row) if i == len(rows) - 1 else treelog.branch(row))
+        self._sync_jam_button()
 
         if array:
             # 15 FPS in-place value updates and sort refreshes.
@@ -239,6 +242,7 @@ class ScannerView(Screen):
             self._log_auto_crack_status_when_changed()
 
     async def on_screen_resume(self) -> None:
+        self._sync_jam_button()
         # Restart channel hopper
         array = self.app.array
         if not array:
@@ -259,6 +263,7 @@ class ScannerView(Screen):
     # ----- Per-tick refresh --------------------------------------------------
 
     def refresh_table(self) -> None:
+        self._sync_jam_button()
         array = self.app.array
         if not array:
             return
@@ -482,6 +487,37 @@ class ScannerView(Screen):
         log_widget = self.query_one("#system-log")
         log_widget.display = not log_widget.display
 
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        if action == "jam_all" and isinstance(self.focused, Input):
+            return False
+        return super().check_action(action, parameters)
+
+    def _jam_running(self) -> bool:
+        return bool(getattr(self.app, "jam_all_running", False))
+
+    def _sync_jam_button(self) -> None:
+        try:
+            button = self.query_one("#filter-jam-all", Button)
+        except NoMatches:
+            return
+        running = self._jam_running()
+        button.label = "Stop Jam" if running else "Jam All"
+        button.variant = "error" if running else "primary"
+        button.refresh(layout=True)
+
+    def action_jam_all(self) -> None:
+        toggle = getattr(self.app, "toggle_jam_all", None)
+        if toggle is None:
+            return
+        started = toggle(log=self._write_log)
+        self._sync_jam_button()
+        if started:
+            self._write_log(treelog.header("Jam All sweeping every known AP"))
+        elif self._jam_running():
+            self._write_log(treelog.header("Jam All stopping", color="orange1"))
+        else:
+            self._write_log(treelog.leaf("Jam All needs a free radio and a card"))
+
     def selected_ap(self) -> Optional[AccessPoint]:
         bssid = self.query_one("#ap-table", APTable).cursor_bssid
         return self.ap_cache.get(bssid) if bssid else None
@@ -676,6 +712,9 @@ class ScannerView(Screen):
 
     def on_filter_bar_open_probes(self) -> None:
         self.action_open_probes()
+
+    def on_filter_bar_jam_all(self) -> None:
+        self.action_jam_all()
 
     def _prune_aps_outside(self, channels: List[int]) -> int:
         array = self.app.array

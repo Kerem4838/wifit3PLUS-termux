@@ -27,6 +27,8 @@
   - Automatically remembers `BSSID -> SSID` and OUI/WSC router models across restarts in both the main Scanner and Probe Scanner.
 - **Double-Click / Enter Focus & Client Tagging:**
   - Double-clicking or pressing `Enter` on an associated client in Probe Scanner or Vault Probes jumps directly to `FocusViewV2` on its AP and highlights that client (`★`).
+- **Jam All (`j` / `Jam All` button, Scanner only):**
+  - Global deauthentication sweep over every known AP and associated client. https://github.com/Kerem4838/wifit3PLUS-termux#whats-new-in-wifit3plus-custom-042
 
 ## Why?
 * **Cross-Platform:** Runs identically on Linux, macOS, Windows, and Android (via Termux).

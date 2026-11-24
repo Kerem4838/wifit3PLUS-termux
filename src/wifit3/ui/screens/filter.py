@@ -93,12 +93,13 @@ class FilterBar(HorizontalScroll):
     FilterBar > #filter-channels-label,
     FilterBar > .filter-power-label { text-wrap: nowrap; text-overflow: clip; }
     FilterBar > #filter-encryption { width: 9; margin-right: 2; }
-    FilterBar > #filter-channels { margin-right: 2; }
+    FilterBar > #filter-channels { min-width: 0; width: auto; margin-right: 1; }
     FilterBar > #filter-power-short-label { display: none; }
     FilterBar > #filter-power { width: 7; margin-right: 2; }
     FilterBar > Input { width: 1fr; min-width: 8; max-width: 32; }
     FilterBar > #filter-hide-silenced { margin-left: 1; border: none; }
     FilterBar > #filter-open-probes { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
+    FilterBar > #filter-jam-all { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
     FilterBar Select.-expanded SelectOverlay { border: round $primary !important; background: $surface; }
     """
 
@@ -113,6 +114,9 @@ class FilterBar(HorizontalScroll):
         pass
 
     class OpenProbes(Message):
+        pass
+
+    class JamAll(Message):
         pass
 
     def __init__(self, supported_channels: List[int]) -> None:
@@ -142,10 +146,12 @@ class FilterBar(HorizontalScroll):
             allow_blank=False, id="filter-power", compact=True,
         )
         yield Input(placeholder="filter by ssid…", id="filter-text", compact=True)
-        yield Checkbox("Hide silenced", value=Config.hide_silenced,
+        yield Checkbox("Silenced", value=Config.hide_silenced,
                        id="filter-hide-silenced", compact=True)
         yield Button("Probes", id="filter-open-probes", compact=True,
                      tooltip="Open Probe Scanner (r)")
+        yield Button("Jam All", id="filter-jam-all", compact=True,
+                     tooltip="Deauthenticate every known AP and client (j)")
 
     def focus_text(self) -> None:
         self.query_one("#filter-text", Input).focus()
@@ -191,6 +197,8 @@ class FilterBar(HorizontalScroll):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "filter-open-probes":
             self.post_message(self.OpenProbes())
+        elif event.button.id == "filter-jam-all":
+            self.post_message(self.JamAll())
         else:
             self.post_message(self.EditChannels())
 

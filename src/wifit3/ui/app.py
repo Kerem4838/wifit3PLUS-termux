@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, Callable, List, Optional, Set
 
 from textual import events, work
 from textual.app import App
@@ -19,6 +19,8 @@ from textual.widgets._header import HeaderClock, HeaderIcon, HeaderTitle
 from textual.worker import get_current_worker
 
 from wifit3 import __custom_version__, __version__
+from wifit3.campaigns.campaign import Campaign
+from wifit3.campaigns.jam_all import JamAllCampaign
 from wifit3.chips import log_trace
 from wifit3.models.jobs import JobState, ToolStatus
 from wifit3.persist.ap_state import PasswordStatus
@@ -172,6 +174,7 @@ class WifiteApp(App):
             self._config_error = str(e)
         _configure_file_logging(cli_log_level)
         self.array: Optional[WlanArray] = None
+        self.jam_all_campaign: Optional[JamAllCampaign] = None
         self.device_manager = DeviceManager(self)
         self.device_watch = DeviceWatch(device_manager=self.device_manager,
                                         on_change=self._on_devices_changed,
@@ -492,6 +495,7 @@ class WifiteApp(App):
     async def recover_to_splash(self) -> None:
         """Return to the splash screen after the last card was lost."""
         array = self.array
+        await self.stop_jam_all()
         # Unwind to the base default screen (kept by `> 1`), then re-push splash onto it.
         while len(self.screen_stack) > 1:
             await self.pop_screen()
@@ -521,7 +525,36 @@ class WifiteApp(App):
         if self.screen is not focus:
             self.push_screen(focus)
 
+    @property
+    def jam_all_running(self) -> bool:
+        """Whether the global sweep currently owns the radio."""
+        camp = self.jam_all_campaign
+        return camp is not None and not camp.done and Campaign.active is camp
+
+    def toggle_jam_all(self, log: Optional[Callable[[str], None]] = None) -> bool:
+        """Start the sweep, or request its stop. True when a sweep was started."""
+        camp = self.jam_all_campaign
+        if camp is not None and not camp.done and Campaign.active is camp:
+            camp.request_stop()
+            return False
+        if self.array is None or Campaign.active is not None:
+            return False
+        sweep = JamAllCampaign(self.array, log=log)
+        if not sweep.run():
+            return False
+        self.jam_all_campaign = sweep
+        return True
+
+    async def stop_jam_all(self) -> None:
+        """Drain a running sweep before the radio pool closes."""
+        camp = self.jam_all_campaign
+        if camp is None:
+            return
+        await camp.stop()
+        self.jam_all_campaign = None
+
     async def action_quit(self):
+        await self.stop_jam_all()
         if self.array is not None:
             self.vault.sync_known_aps(self.array.access_points)
             self.vault.sync_probes(self.array.probes, self.array.access_points)
