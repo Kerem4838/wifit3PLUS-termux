@@ -15,7 +15,7 @@ import time
 from typing import Dict, List, Optional, Set
 
 from wifit3.chips.log_trace import TRACE   # registers Logger.trace + the level name
-from wifit3.models import AccessPoint, Client, Handshake, HandshakeMessage, IdSource
+from wifit3.models import AccessPoint, Client, Handshake, HandshakeMessage, IdSource, ProbeRecord, ProbedSsid
 from wifit3.dot11.eapol import AES_128_CMAC, HMAC_SHA1_AES, KEY_DESCRIPTOR_VERSION_MASK
 from wifit3.dot11.mac import mac_to_str
 from wifit3.dot11.parser import WlanFrameParser
@@ -67,6 +67,7 @@ class WlanSink:
     def __init__(self):
         self.access_points: Dict[str, AccessPoint] = {}
         self.clients: Dict[str, Client] = {}
+        self.probes: Dict[str, ProbeRecord] = {}
         self.wep_store = WepCaptureStore()  # WEP IV tallying
         self.packet_stats = PacketStats()   # Packet dashboard source
         self.own_macs: Set[str] = set()     # MACs we transmit as; dropped at ingest, never a client
@@ -95,6 +96,9 @@ class WlanSink:
     def _record_client_signal(self, client: Client, card_id: str, rssi: int) -> None:
         client.signal_by_card[card_id] = self._smooth(client.signal_history, card_id, rssi)
 
+    def _record_probe_signal(self, record: ProbeRecord, card_id: str, rssi: int) -> None:
+        record.signal_by_card[card_id] = self._smooth(record.signal_history, card_id, rssi)
+
     # ----- ingest ------------------------------------------------------------
 
     def update(self, pkt: Packet, card_id: str, channel_hint: int = 1) -> None:
@@ -111,8 +115,7 @@ class WlanSink:
         ) and logger.isEnabledFor(TRACE):
             logger.trace("%s", _fmt_frame("RXFRAME", frame_type, pkt.source, pkt.dest, bssid))
 
-        if isinstance(pkt, ProbeReqPacket) and self._is_real_ssid(pkt.ssid):
-            self.probed_ssids.add(pkt.ssid)
+        self._on_probe_req(pkt, card_id, channel_hint)
 
         if not bssid or bssid == "Unknown" or bssid == "ff:ff:ff:ff:ff:ff":
             return
@@ -121,7 +124,7 @@ class WlanSink:
 
         self._on_beacon_frame(pkt, card_id, channel_hint)
         self._on_wepdata_frame(pkt)
-        self._track_client(pkt, card_id)
+        self._track_client(pkt, card_id, channel_hint)
         self._on_eapol_frame(pkt)
         self._on_eap_frame(pkt)
 
@@ -132,6 +135,12 @@ class WlanSink:
         ap = self.access_points.get(bssid)
         if ap is not None:
             self._record_ap_signal(ap, card_id, rssi)
+
+    def record_probe_signal(self, card_id: str, client_mac: str, rssi: int) -> None:
+        """Update per-card RSSI on a ProbeRecord when another card also hears the probe."""
+        record = self.probes.get(client_mac)
+        if record is not None:
+            self._record_probe_signal(record, card_id, rssi)
 
     def record_injected_eapol(self, frame: bytes) -> None:
         """Fold EvilTwin's injected M1 into the sink, bypassing the array's own-frame RX filter, so
@@ -302,7 +311,7 @@ class WlanSink:
                 ap.wep = stats
         return True
 
-    def _track_client(self, pkt: Packet, card_id: str) -> bool:
+    def _track_client(self, pkt: Packet, card_id: str, channel_hint: int = 1) -> bool:
         """Register/refresh the client STA behind a frame (assoc, probed SSIDs, decloak)."""
         frame_type = pkt.type
         if frame_type not in (
@@ -343,6 +352,9 @@ class WlanSink:
                 if client.bssid is not None:
                     self._pmkid_m1_awaiting_m2.pop((client.bssid, client_mac), None)
             client.bssid = bssid
+            probe = self.probes.get(client_mac)
+            if probe is not None:
+                probe.associated_bssid = bssid
             if isinstance(pkt, AssocRequestPacket):
                 client.akm_selected = pkt.assoc_akm
 
@@ -357,6 +369,10 @@ class WlanSink:
             ap = self.access_points.get(bssid)
             if ap is not None:
                 self.decloak(ap, pkt.ssid, frame_type)
+            if self._is_real_ssid(pkt.ssid):
+                self._record_probed_ssid(
+                    client_mac, pkt.ssid, card_id, rssi, channel_hint, associated_bssid=bssid,
+                )
         return True
 
     def _on_eapol_frame(self, pkt: Packet) -> bool:
@@ -478,6 +494,51 @@ class WlanSink:
         if not apply_wsc_identity(ap.identity, IdSource.WSC_M1, parsed.attrs):
             return False
         ap.wps = True
+        return True
+
+    def _record_probed_ssid(
+        self,
+        client_mac: Optional[str],
+        ssid: Optional[str],
+        card_id: str,
+        rssi: int,
+        channel_hint: int,
+        *,
+        associated_bssid: Optional[str] = None,
+    ) -> None:
+        if not client_mac or is_group_mac(client_mac) or client_mac in self.own_macs:
+            return
+        now = time.time()
+        record = self.probes.get(client_mac)
+        if record is None:
+            record = self.probes[client_mac] = ProbeRecord(mac=client_mac, first_seen=now)
+        elif record.first_seen == 0.0:
+            record.first_seen = now
+        record.last_seen = now
+        record.count += 1
+        record.last_channel = channel_hint
+        self._record_probe_signal(record, card_id, rssi)
+        if self._is_real_ssid(ssid):
+            self.probed_ssids.add(ssid)
+            entry = record.ssids.get(ssid)
+            if entry is None:
+                record.ssids[ssid] = ProbedSsid(ssid=ssid, count=1, first_seen=now, last_seen=now)
+            else:
+                entry.count += 1
+                entry.last_seen = now
+        else:
+            record.broadcast_count += 1
+        if associated_bssid:
+            record.associated_bssid = associated_bssid
+        else:
+            client = self.clients.get(client_mac)
+            if client is not None and client.bssid:
+                record.associated_bssid = client.bssid
+
+    def _on_probe_req(self, pkt: Packet, card_id: str, channel_hint: int) -> bool:
+        if not isinstance(pkt, ProbeReqPacket):
+            return False
+        self._record_probed_ssid(pkt.source, pkt.ssid, card_id, pkt.rssi, channel_hint)
         return True
 
     def decloak(self, ap: AccessPoint, ssid: str, method: str) -> None:
@@ -621,6 +682,7 @@ class WlanSink:
         mac_str = mac_to_str(mac) if isinstance(mac, (bytes, bytearray)) else str(mac).lower()
         self.own_macs.add(mac_str)
         self.clients.pop(mac_str, None)
+        self.probes.pop(mac_str, None)
         return mac_str
 
     def unregister_own_mac(self, mac) -> None:

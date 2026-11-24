@@ -13,8 +13,8 @@ from typing import AsyncIterator, Callable, Dict, List, Optional, Set
 
 from wifit3.chips.driver import FakeMacSupport
 from wifit3.dot11.chan import is_dfs_channel
-from wifit3.dot11.packet import BeaconPacket, Packet
-from wifit3.models import AccessPoint, Client
+from wifit3.dot11.packet import BeaconPacket, Packet, ProbeReqPacket
+from wifit3.models import AccessPoint, Client, ProbeRecord
 from wifit3.wlan.dedupe import StreamMerger
 from wifit3.wlan.interface import WlanInterface
 from wifit3.wlan.packet_stats import PacketStats
@@ -200,7 +200,10 @@ class WlanArray:
             self._sink.update(pkt, card_id, channel_hint=iface.current_channel)
             self._sink.dispatch_rx(pkt)
         elif is_first_for_card:
-            self._sink.record_signal(card_id, pkt.bssid, pkt.rssi)
+            if isinstance(pkt, ProbeReqPacket) and pkt.source:
+                self._sink.record_probe_signal(card_id, pkt.source, pkt.rssi)
+            else:
+                self._sink.record_signal(card_id, pkt.bssid, pkt.rssi)
 
     def ignore_stray_beacons(self, bssid: str, channel: int) -> None:
         """Drop this BSSID's beacons/probe-resps on ``channel``."""
@@ -222,6 +225,10 @@ class WlanArray:
     @property
     def clients(self) -> Dict[str, Client]:
         return self._sink.clients
+
+    @property
+    def probes(self) -> Dict[str, ProbeRecord]:
+        return self._sink.probes
 
     @property
     def forged_macs(self) -> Set[str]:

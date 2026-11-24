@@ -65,10 +65,14 @@ def _require_termux_libusb(parser) -> None:
 def _parser():
     import argparse
 
-    from wifit3 import __version__
+    from wifit3 import __custom_version__, __version__
 
     parser = argparse.ArgumentParser(prog="wifit3", description="USB Wireless Auditor")
-    parser.add_argument("--version", action="version", version=f"wifit3 {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"wifit3 {__version__} (custom {__custom_version__})",
+    )
     parser.add_argument("--smoke", action="store_true", help="TEST ONLY: Run headless, render, exit 0")
     parser.add_argument("--quiet", action="store_true", help="Do not emit any logs")
     parser.add_argument("--debug", action="store_true", help="Emit verbose debug logs")

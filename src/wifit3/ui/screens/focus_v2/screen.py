@@ -270,12 +270,15 @@ class FocusViewV2(Screen):
     .bcast-btn { width: 100%%; height: 1; min-width: 0; border: none; margin: 0 0 1 0;
                  background: $error; color: $text; content-align: center middle; }
     .client-row { height: 1; width: 100%%; }
+    .client-row.-tagged { background: $warning 25%%; text-style: bold; }
+    .client-row.-tagged .cl-bssid { color: $warning; text-style: bold; }
+    .client-row.-tagged .cl-fp { color: $warning; }
     .cl-fp { width: 2; }
     /* A known fingerprint is clickable (pops up the detail popup): underline + accent color on
        the MAC marks it, same as any other actionable text. Not on the emoji itself -- the
        underline renders through the glyph rather than under it, which reads as broken/ugly. */
     .cl-bssid.fp-known { text-style: underline; color: $secondary; }
-    .cl-bssid { width: 17; }
+    .cl-bssid { width: 1fr; min-width: 17; }
     .cl-pwr { width: 5; text-align: right; }
     .cl-pkts { width: 6; text-align: right; }
     .cl-deauth { width: 3; min-width: 3; height: 1; border: none; margin: 0 0 0 1;
@@ -335,7 +338,12 @@ class FocusViewV2(Screen):
             yield CardEndpoint(**self._card_values(), id="card")
             yield RouterEndpoint(**self._router_values(), id="router")
         with Horizontal(id="bottom"):
-            yield ClientsList(self._client_list(), id="clients")
+            yield ClientsList(
+                self._client_list(),
+                tagged_mac=self.app.tagged_client_mac,
+                nickname_lookup=self.app.vault.probe_nickname,
+                id="clients",
+            )
             yield LogBand([], id="log")
         yield GlobalJobTracker()
         yield Footer()
@@ -357,8 +365,14 @@ class FocusViewV2(Screen):
         target = self.app.target_ap
         if target is not self._target_ap:
             await self._enter_target()
-        elif target is not None and self.app.array is not None:
-            self.run_worker(self._repin_to_target(self.app.array, target), group="tune", exclusive=True)
+        elif target is not None:
+            self.query_one("#clients", ClientsList).sync(
+                self._client_list(),
+                tagged_mac=self.app.tagged_client_mac,
+                nickname_lookup=self.app.vault.probe_nickname,
+            )
+            if self.app.array is not None:
+                self.run_worker(self._repin_to_target(self.app.array, target), group="tune", exclusive=True)
 
     async def _tune_to_target(self, array, ap: AccessPoint) -> None:
         await array.stop_hopping()
@@ -598,7 +612,11 @@ class FocusViewV2(Screen):
         self.query_one("#card", CardEndpoint).update(dynamic=fm.status_under_card())
         self._sync_card()
         self.query_one("#router", RouterEndpoint).update(**self._router_values())
-        self.query_one("#clients", ClientsList).sync(self._client_list())
+        self.query_one("#clients", ClientsList).sync(
+            self._client_list(),
+            tagged_mac=self.app.tagged_client_mac,
+            nickname_lookup=self.app.vault.probe_nickname,
+        )
         self.refresh_buttons()
         self._balance_status()
         self._refresh_status_footer()  # dashboard footer (cleared by reconfigure)
@@ -635,6 +653,17 @@ class FocusViewV2(Screen):
             self._log(treelog.leaf("[italic]Deauth[/] disabled because protection is unknown"))
 
         self._log_persisted_history(ap)
+
+        if self.app.tagged_client_mac:
+            nick = self.app.vault.probe_nickname(self.app.tagged_client_mac)
+            label = (
+                f"{escape(nick)} ({escape(self.app.tagged_client_mac)})"
+                if nick
+                else escape(self.app.tagged_client_mac)
+            )
+            self._log(treelog.branch(
+                f"[bold yellow]★ Tagged client:[/] [cyan]{label}[/]"
+            ))
 
         if Config.is_silenced(ap.bssid):
             self._log_silenced()
@@ -730,7 +759,11 @@ class FocusViewV2(Screen):
         self._sync_card()
         self.query_one("#router", RouterEndpoint).update(**self._router_values())
         clients = self.query_one("#clients", ClientsList)
-        clients.sync(self._client_list())
+        clients.sync(
+            self._client_list(),
+            tagged_mac=self.app.tagged_client_mac,
+            nickname_lookup=self.app.vault.probe_nickname,
+        )
         clients.set_deauth_enabled(not fm.deauth_blocked(ap))
         self.refresh_buttons()
         self._balance_status()

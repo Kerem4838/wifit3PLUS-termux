@@ -13,6 +13,7 @@ from .access_point import (
     WepStats,
 )
 from .client import Client
+from .probe import ProbeRecord, ProbedSsid
 from .device_id import DeviceID
 from .identity import ApIdentity, IdKey, IdSource
 from .jobs import JobAction, ToolCapability, ToolName, ToolStatus, JobState, ToolResult
@@ -32,6 +33,8 @@ __all__ = [
     "PersistedCapture",
     "AccessPoint",
     "Client",
+    "ProbeRecord",
+    "ProbedSsid",
     "DeviceID",
     "JobAction",
     "ToolCapability",

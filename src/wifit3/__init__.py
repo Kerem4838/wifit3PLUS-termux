@@ -3,3 +3,4 @@
 # release workflow gates the pushed tag against it. Kept as a plain literal so the frozen
 # PyInstaller binary reports it from `wifit3 --version` without bundling dist metadata.
 __version__ = "0.7.1+termux.1"
+__custom_version__ = "0.4.2"

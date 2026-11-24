@@ -37,3 +37,12 @@ def header_len(fc0: int, fc1: int) -> int:
 def random_client_mac() -> bytes:
     """Random locally-administered unicast MAC (0x02 prefix + 5 random bytes)."""
     return bytes([0x02]) + os.urandom(5)
+
+
+def is_randomized_mac(mac: str) -> bool:
+    """True for a locally administered unicast MAC (Android/iOS/OS MAC randomization)."""
+    try:
+        first = int(mac.split(":", 1)[0], 16)
+    except (ValueError, IndexError):
+        return False
+    return bool(first & 0x02) and not bool(first & 0x01)

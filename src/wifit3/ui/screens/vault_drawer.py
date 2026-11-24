@@ -4,12 +4,20 @@ from typing import Optional
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import Footer, DataTable, Input
+from textual.css.query import NoMatches
+from textual.widgets import Button, Footer, DataTable, Input
 from textual.screen import ModalScreen
 from textual import events, on, work
 from textual.binding import Binding
 
 from .vault_breakpoints import COMPACT, NARROW, SHORT, TALL, TINY, WIDE
+from .vault_probes import (
+    ClearProbesPressed,
+    DeleteProbePressed,
+    FocusProbeApPressed,
+    NicknameProbePressed,
+    VaultProbesView,
+)
 from .vault_table import VaultTable
 from .vault_item import AddKeyPressed, DeleteKeyPressed, ShowApPressed, VaultItemView, key_description
 from wifit3.models import AccessPoint, CaptureType, PersistedCapture
@@ -42,6 +50,7 @@ class VaultDrawer(ModalScreen):
         Binding("escape", "dismiss_drawer", "Close", show=True),
         Binding("f", "focus_filter", "Filter", show=False),
         Binding("/", "focus_filter", "Filter", show=False),
+        Binding("p", "toggle_probes_section", "Probes", show=True),
         Binding("n", "set_nickname", "Nickname", show=True),
         Binding("a", "add_credential", "Add Key", show=True),
         Binding("o", "show_directory", "Open Dir", show=True),
@@ -63,11 +72,14 @@ class VaultDrawer(ModalScreen):
         transition: offset 200ms in_out_cubic;
     }
 
-    VaultDrawer.-tiny #vault-main, VaultDrawer.-narrow #vault-main, VaultDrawer.-compact #vault-main {
+    VaultDrawer.-tiny #vault-main, VaultDrawer.-narrow #vault-main, VaultDrawer.-compact #vault-main,
+    VaultDrawer.-tiny #vault-probes, VaultDrawer.-narrow #vault-probes, VaultDrawer.-compact #vault-probes {
         layout: vertical;
     }
     VaultDrawer.-tiny #vault-table, VaultDrawer.-narrow #vault-table, VaultDrawer.-compact #vault-table,
-    VaultDrawer.-tiny #vault-item, VaultDrawer.-narrow #vault-item, VaultDrawer.-compact #vault-item {
+    VaultDrawer.-tiny #vault-item, VaultDrawer.-narrow #vault-item, VaultDrawer.-compact #vault-item,
+    VaultDrawer.-tiny #vault-probes-left, VaultDrawer.-narrow #vault-probes-left, VaultDrawer.-compact #vault-probes-left,
+    VaultDrawer.-tiny #vault-probes-right, VaultDrawer.-narrow #vault-probes-right, VaultDrawer.-compact #vault-probes-right {
         width: 100%;
         height: 1fr;
     }
@@ -78,6 +90,22 @@ class VaultDrawer(ModalScreen):
     VaultDrawer.open #vault-content {
         offset-y: 0%;
     }
+    VaultDrawer #vault-section-bar {
+        height: auto;
+        padding: 0 1;
+        background: $panel;
+    }
+    VaultDrawer #vault-section-bar Button {
+        min-width: 0;
+        height: 1;
+        border: none;
+        padding: 0 2;
+        margin-right: 1;
+    }
+    VaultDrawer #vault-probes Button {
+        min-width: 0;
+        margin-right: 1;
+    }
     VaultDrawer #vault-item .key-line Button, VaultDrawer #vault-item Button.add-key,
     VaultDrawer #vault-item Button.show-ap {
         min-width: 0;
@@ -87,9 +115,10 @@ class VaultDrawer(ModalScreen):
     VaultDrawer.-tiny #vault-item Button.tool-btn { min-width: 0; }
     """
 
-    def __init__(self, preselected_bssid: Optional[str] = None) -> None:
+    def __init__(self, preselected_bssid: Optional[str] = None, initial_section: str = "aps") -> None:
         super().__init__()
         self._preselected_bssid = preselected_bssid
+        self._section = "probes" if initial_section == "probes" else "aps"
         self._reveal_scheduled = False
         self._selection_timer = None
         self._pending_bssid: str | None = None
@@ -97,14 +126,22 @@ class VaultDrawer(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="vault-content"):
+            with Horizontal(id="vault-section-bar"):
+                yield Button("APs (0)", id="vault-tab-aps", variant="primary")
+                yield Button("Probes (0)", id="vault-tab-probes")
             with Horizontal(id="vault-main"):
                 yield VaultTable(id="vault-table")
                 yield VaultItemView(id="vault-item")
+            yield VaultProbesView(id="vault-probes")
             yield JobTrackerPane()
             yield Footer()
 
     def on_mount(self) -> None:
-        self.call_after_refresh(self._focus_list)
+        if self.app.array is not None:
+            self.app.vault.sync_probes(self.app.array.probes, self.app.array.access_points)
+        self._update_section_counts()
+        self._apply_section()
+        self.call_after_refresh(self._focus_active_section)
 
     def _schedule_reveal(self) -> None:
         if self.has_class("open") or self._reveal_scheduled:
@@ -128,7 +165,68 @@ class VaultDrawer(ModalScreen):
         except Exception:
             pass
 
+    def _focus_active_section(self) -> None:
+        if self._section == "probes":
+            try:
+                self.query_one("#vault-probes", VaultProbesView).focus_table()
+            except NoMatches:
+                pass
+        else:
+            self._focus_list()
+
+    def _update_section_counts(self) -> None:
+        try:
+            aps_btn = self.query_one("#vault-tab-aps", Button)
+            probes_btn = self.query_one("#vault-tab-probes", Button)
+        except NoMatches:
+            return
+        ap_count = len({c.bssid for c in self.app.vault.all_captures()})
+        probe_count = len(self.app.vault.all_probes())
+        aps_btn.label = f"APs ({ap_count})"
+        probes_btn.label = f"Probes ({probe_count})"
+
+    def _apply_section(self) -> None:
+        show_probes = self._section == "probes"
+        try:
+            main = self.query_one("#vault-main", Horizontal)
+            probes = self.query_one("#vault-probes", VaultProbesView)
+            aps_btn = self.query_one("#vault-tab-aps", Button)
+            probes_btn = self.query_one("#vault-tab-probes", Button)
+        except NoMatches:
+            return
+        main.display = not show_probes
+        probes.display = show_probes
+        aps_btn.variant = "default" if show_probes else "primary"
+        probes_btn.variant = "primary" if show_probes else "default"
+        if show_probes:
+            probes.reload()
+        self._focus_active_section()
+
+    def action_toggle_probes_section(self) -> None:
+        self._section = "aps" if self._section == "probes" else "probes"
+        self._apply_section()
+
+    @on(Button.Pressed, "#vault-tab-aps")
+    def _on_aps_tab_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if self._section != "aps":
+            self._section = "aps"
+            self._apply_section()
+
+    @on(Button.Pressed, "#vault-tab-probes")
+    def _on_probes_tab_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if self._section != "probes":
+            self._section = "probes"
+            self._apply_section()
+
     def action_focus_filter(self) -> None:
+        if self._section == "probes":
+            try:
+                self.query_one("#vault-probes", VaultProbesView).focus_filter()
+            except NoMatches:
+                pass
+            return
         self.query_one("#vault-filter", Input).focus()
 
     def action_dismiss_drawer(self) -> None:
@@ -193,6 +291,11 @@ class VaultDrawer(ModalScreen):
             table.reload_nicknames()
         else:
             table.reload_table()
+        try:
+            self.query_one("#vault-probes", VaultProbesView).reload()
+            self._update_section_counts()
+        except NoMatches:
+            pass
 
     @on(VaultTable.TableReloaded)
     def _table_reloaded(self, event: VaultTable.TableReloaded) -> None:
@@ -229,7 +332,35 @@ class VaultDrawer(ModalScreen):
         bssid = aps.coordinate_to_cell_key(aps.cursor_coordinate).row_key.value or ""
         return self.app.vault.ssid(bssid), bssid
 
+    def _prompt_probe_nickname(self, mac: str) -> None:
+        current = self.app.vault.probe_nickname(mac)
+
+        def _save(value: Optional[str]) -> None:
+            if value is None:
+                return
+            self.app.vault.set_probe_nickname(mac, value)
+            try:
+                self.query_one("#vault-probes", VaultProbesView).reload()
+            except NoMatches:
+                pass
+            self.notify("Client nickname saved" if value else "Client nickname cleared")
+
+        self.app.push_screen(
+            NicknameModal(None, current, title="Set Client Nickname", subtitle=mac),
+            _save,
+        )
+
     def action_set_nickname(self) -> None:
+        if self._section == "probes":
+            try:
+                mac = self.query_one("#vault-probes", VaultProbesView).selected_mac()
+            except NoMatches:
+                return
+            if not mac:
+                self.notify("Select a probe client first", severity="warning")
+                return
+            self._prompt_probe_nickname(mac)
+            return
         ssid, bssid = self._selected_network()
         if not bssid:
             self.notify("Select an AP first", severity="warning")
@@ -251,6 +382,16 @@ class VaultDrawer(ModalScreen):
         self.app.push_screen(NicknameModal(ssid, current), _save)
 
     def action_delete_ap(self) -> None:
+        if self._section == "probes":
+            try:
+                mac = self.query_one("#vault-probes", VaultProbesView).selected_mac()
+            except NoMatches:
+                return
+            if not mac:
+                self.notify("Select a probe client first", severity="warning")
+                return
+            self._prompt_delete_probe(mac)
+            return
         ssid, bssid = self._selected_network()
         if not bssid:
             self.notify("Select an AP first", severity="warning")
@@ -303,23 +444,58 @@ class VaultDrawer(ModalScreen):
     def _show_ap_pressed(self, event: ShowApPressed) -> None:
         """Close onto Focus on the AP: back down to Focus when it is on the stack, else push it."""
         app = self.app
-        ap = None
-        if app.array is not None:
-            ap = app.array.access_points.get(event.bssid)
+        ap = app.array.access_points.get(event.bssid) if app.array is not None else None
         if ap is None:
             self.notify("AP not in range")
             return
-        app.target_ap = ap
         self.dismiss()
-        focus = app.focus_view
-        while focus in app.screen_stack and app.screen is not focus:
-            app.pop_screen()
-        if app.screen is not focus:
-            app.push_screen(focus)
+        app.focus_ap(ap)
+
+    @on(FocusProbeApPressed)
+    def _focus_probe_ap_pressed(self, event: FocusProbeApPressed) -> None:
+        app = self.app
+        ap = app.array.access_points.get(event.bssid) if app.array is not None else None
+        if ap is None:
+            self.notify("AP not in range", severity="warning")
+            return
+        self.dismiss()
+        app.focus_ap(ap, tag_client_mac=event.mac)
+
+    @on(NicknameProbePressed)
+    def _nickname_probe_pressed(self, event: NicknameProbePressed) -> None:
+        self._prompt_probe_nickname(event.mac)
 
     def action_add_credential(self) -> None:
+        if self._section == "probes":
+            self.notify("Switch to APs section for this action", severity="warning")
+            return
         ssid, bssid = self._selected_network()
         self.app.push_screen(AddCredentialModal(ssid or "", bssid), self._credential_added)
+
+    def _prompt_delete_probe(self, mac: str) -> None:
+        prompt = f"Delete probe history for [bold]{escape(mac)}[/]?"
+
+        def _delete(confirmed: Optional[bool]) -> None:
+            if not confirmed:
+                return
+            if self.app.vault.delete_probe(mac):
+                self.notify(f"Deleted probes for {mac}")
+
+        self.app.push_screen(ConfirmModal(prompt), _delete)
+
+    @on(DeleteProbePressed)
+    def _delete_probe_pressed(self, event: DeleteProbePressed) -> None:
+        self._prompt_delete_probe(event.mac)
+
+    @on(ClearProbesPressed)
+    def _clear_probes_pressed(self, _event: ClearProbesPressed) -> None:
+        def _clear(confirmed: Optional[bool]) -> None:
+            if not confirmed:
+                return
+            self.app.vault.clear_probes()
+            self.notify("Cleared all saved probe history")
+
+        self.app.push_screen(ConfirmModal("Delete [bold]all[/] saved probe records?"), _clear)
 
     def _credential_added(self, credential: Optional[ManualCredential]) -> None:
         if credential is None:

@@ -17,13 +17,15 @@ from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional
 from wifit3.crack.hc22000_format import Hc22000Line
 from wifit3.crack.wpa_psk import psk_matches, psk_verdict
 from wifit3.id.ssid import strip_suffix
-from wifit3.models import WPS_CAPTURE_TYPES, CaptureType, PersistedCapture
+from wifit3.models import WPS_CAPTURE_TYPES, AccessPoint, CaptureType, PersistedCapture, ProbeRecord
 from wifit3.persist import ap_state, save
 from wifit3.persist.ap_state import ApState, Key, PasswordStatus, read_hashlines
 from wifit3.persist.capture_history import load_capture_index, summarize
 from wifit3.persist.common import LEGACY_CAPTURE_RE, bssid_to_dashed, safe_ssid, wps_run_state_name
 from wifit3.persist.config import Config
+from wifit3.persist.known_aps import KnownAp, KnownApStore
 from wifit3.persist.meta import clear_meta_paths_cache, meta_path, update_meta
+from wifit3.persist.probe_store import PersistedProbe, ProbeStore
 from wifit3.persist.save import SaveResult
 from wifit3.vault.manager import JobManager
 from wifit3.wlan.sink import WlanSink
@@ -99,6 +101,8 @@ class Vault:
     def __init__(self) -> None:
         self._index: Dict[str, List[PersistedCapture]] = {}
         self._ap_states: Dict[str, ApState] = {}
+        self.probe_store = ProbeStore()
+        self.known_aps = KnownApStore()
         self._change_listeners: list[Callable[[Optional[str]], None]] = []
         self._probed_ssids_source: Callable[[], Iterable[str]] = lambda: ()
         self._refresh_count = 0
@@ -122,6 +126,8 @@ class Vault:
         """Re-scan Config.captures_dir into the cache."""
         clear_meta_paths_cache()
         self._index = load_capture_index()
+        self.probe_store.reload()
+        self.known_aps.reload()
         self.notify_changed(None)
 
     def subscribe(self, listener: Callable[[Optional[str]], None]) -> None:
@@ -209,6 +215,63 @@ class Vault:
     def all_captures(self) -> List[PersistedCapture]:
         """Every saved capture across all APs, unordered (callers sort as needed)."""
         return [c for caps in self._index.values() for c in caps]
+
+    def all_probes(self) -> List[PersistedProbe]:
+        """Every saved client probe record, sorted newest-first."""
+        return self.probe_store.all_probes()
+
+    def sync_probes(
+        self,
+        live_probes: Dict[str, ProbeRecord],
+        access_points: Dict[str, "AccessPoint"],
+    ) -> bool:
+        """Merge live session probes into Vault storage; returns True if disk changed."""
+        return self.probe_store.sync(
+            live_probes,
+            access_points,
+            ssid_lookup=lambda bssid: (
+                self.ssid(bssid) or Config.decloaked_ssid(bssid) or self.known_aps.ssid(bssid)
+            ),
+        )
+
+    def sync_known_aps(self, access_points: Dict[str, "AccessPoint"]) -> bool:
+        """Persist observed BSSID -> SSID and router model mappings."""
+        return self.known_aps.sync(access_points)
+
+    def known_ap(self, bssid: str) -> Optional[KnownAp]:
+        return self.known_aps.get(bssid)
+
+    def known_ap_ssid(self, bssid: str) -> Optional[str]:
+        return self.known_aps.ssid(bssid)
+
+    def known_ap_model(self, bssid: str) -> str:
+        return self.known_aps.model(bssid)
+
+    def known_ap_by_ssid(self, ssid: str) -> Optional[KnownAp]:
+        return self.known_aps.find_by_ssid(ssid)
+
+    def delete_probe(self, mac: str) -> bool:
+        """Delete one saved client probe record and notify Vault listeners."""
+        deleted = self.probe_store.delete(mac)
+        if deleted:
+            self.notify_changed(None)
+        return deleted
+
+    def probe_nickname(self, mac: str) -> str:
+        """Return the saved nickname for a client MAC, or an empty string."""
+        return self.probe_store.nickname(mac)
+
+    def set_probe_nickname(self, mac: str, nickname: Optional[str]) -> bool:
+        """Persist a client nickname in Vault probes and notify listeners."""
+        changed = self.probe_store.set_nickname(mac, nickname)
+        if changed:
+            self.notify_changed(None)
+        return changed
+
+    def clear_probes(self) -> None:
+        """Delete all saved client probe records and notify Vault listeners."""
+        self.probe_store.clear()
+        self.notify_changed(None)
 
     def capture_payload(self, capture: PersistedCapture) -> str:
         """Copyable text for a capture: its stored value (WEP/WPS), else the file's

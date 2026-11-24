@@ -155,6 +155,7 @@ class ScannerView(Screen):
     ScannerView.-large #filter-power-label { display: none; }
     ScannerView.-medium #filter-power-short-label,
     ScannerView.-large #filter-power-short-label { display: block; }
+    ScannerView #filter-open-probes { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
     """
 
     BINDINGS = [
@@ -168,6 +169,7 @@ class ScannerView(Screen):
         Binding("/", "focus_filter", "Filter", show=False),
         Binding("l", "toggle_log", "Toggle Log", show=True),
         Binding("w", "wps_pbc_mode", "WPS PBC", show=True),
+        Binding("r", "open_probes", "Probes", show=True),
         Binding("v", "open_vault", "Vault", show=True),
         Binding("home", "scroll_home", "Top", show=False, priority=True),
         Binding("end", "scroll_end", "Bottom", show=False, priority=True),
@@ -333,7 +335,7 @@ class ScannerView(Screen):
             wps=ap.wps,
             wps_locked=ap.wps_locked,
             chipset=ap.chipset or "",
-            identity=ap.identity.summary,
+            identity=ap.identity.summary or vault.known_ap_model(ap.bssid),
             is_stale=is_stale,
             beacon_flash=beacon_flash,
             silenced=Config.is_silenced(ap.bssid),
@@ -565,6 +567,9 @@ class ScannerView(Screen):
     def action_open_vault(self) -> None:
         self.app.action_toggle_vault()
 
+    def action_open_probes(self) -> None:
+        self.app.push_screen(self.app.probe_view)
+
     def action_focus_filter(self) -> None:
         self.query_one(FilterBar).focus_text()
 
@@ -669,6 +674,9 @@ class ScannerView(Screen):
     def on_filter_bar_edit_channels(self) -> None:
         self.action_change_channel()
 
+    def on_filter_bar_open_probes(self) -> None:
+        self.action_open_probes()
+
     def _prune_aps_outside(self, channels: List[int]) -> int:
         array = self.app.array
         if not array:
@@ -686,8 +694,7 @@ class ScannerView(Screen):
     async def on_ap_table_row_selected(self, event: APTable.RowSelected) -> None:
         target_ap = self.ap_cache.get(event.bssid)
         if target_ap:
-            self.app.target_ap = target_ap
-            self.app.push_screen(self.app.focus_view)
+            self.app.focus_ap(target_ap)
 
     def on_ap_table_sort_changed(self, event: APTable.SortChanged) -> None:
         self._persist_sort()

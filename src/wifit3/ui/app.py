@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, List, Optional, Set
 
@@ -17,7 +18,7 @@ from textual.widgets import Header
 from textual.widgets._header import HeaderClock, HeaderIcon, HeaderTitle
 from textual.worker import get_current_worker
 
-from wifit3 import __version__
+from wifit3 import __custom_version__, __version__
 from wifit3.chips import log_trace
 from wifit3.models.jobs import JobState, ToolStatus
 from wifit3.persist.ap_state import PasswordStatus
@@ -34,6 +35,7 @@ from wifit3.watchers.ap_watcher import ApDecloaked, ApEvent, ApWatcher, PbcWindo
 
 from .screens.splash import SplashView
 from .screens.scanner import ScannerView
+from .screens.probe_scanner import ProbeScannerView
 from .screens.focus_v2 import FocusViewV2
 from .screens.error_modals import FatalErrorModal, RecoverableErrorModal
 from .screens.new_device import NewDeviceDialog
@@ -54,7 +56,7 @@ HeaderClock.ALLOW_SELECT = False
 class WifiteApp(App):
     """wifit3 TUI Main App."""
 
-    TITLE = f"wifit3 v{__version__} - derv82"
+    TITLE = f"wifit3 v{__version__} | custom v{__custom_version__} - derv82"
 
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
@@ -175,10 +177,13 @@ class WifiteApp(App):
                                         on_change=self._on_devices_changed,
                                         on_fatal=self._on_usb_fatal)
         self.target_ap: Optional[AccessPoint] = None
+        self.tagged_client_mac: Optional[str] = None
         self.splash_view = SplashView()
         self.scanner_view = ScannerView()
+        self.probe_view = ProbeScannerView()
         self.focus_view = FocusViewV2()
         self.vault = Vault()
+        self._last_probe_sync: float = 0.0
         self._vault_notices_lock = threading.Lock()
         self._vault_refresh_pending = False     # a table refresh is scheduled for the notices so far
         self._vault_full_refresh = False        # one of them was a full refresh (BSSID None)
@@ -234,6 +239,7 @@ class WifiteApp(App):
             self.notify(msg, severity="warning", title="Vault")
         self.install_screen(self.splash_view, name="splash")
         self.install_screen(self.scanner_view, name="scanner")
+        self.install_screen(self.probe_view, name="probes")
         self.install_screen(self.focus_view, name="focus")
         
         self.push_screen(self.splash_view)
@@ -296,6 +302,11 @@ class WifiteApp(App):
         if self.array is None:
             return
         self.probed_ssid_file.sync(self.array.probed_ssids)
+        now = time.monotonic()
+        if now - self._last_probe_sync >= 2.0:
+            self._last_probe_sync = now
+            self.vault.sync_known_aps(self.array.access_points)
+            self.vault.sync_probes(self.array.probes, self.array.access_points)
         for event in self.ap_watcher.poll(self.array):
             if isinstance(event, ApDecloaked):
                 if Config.remember_decloak(event.bssid, event.ssid or ""):
@@ -326,7 +337,11 @@ class WifiteApp(App):
 
     def guessid(self, ap: AccessPoint) -> str:
         """The SSID this AP revealed in an earlier session, else its first named sibling's."""
-        return Config.decloaked_ssid(ap.bssid) or self.array.guessid(ap)
+        return (
+            Config.decloaked_ssid(ap.bssid)
+            or self.vault.known_ap_ssid(ap.bssid)
+            or self.array.guessid(ap)
+        )
 
     def _notify_completions(self) -> None:
         """Toast each job the first time it finishes this session (auto-crack jobs only on SUCCESS)
@@ -496,14 +511,27 @@ class WifiteApp(App):
     def action_preferences(self) -> None:
         self.push_screen(PreferencesModal())
 
+    def focus_ap(self, ap: AccessPoint, *, tag_client_mac: Optional[str] = None) -> None:
+        """Open FocusViewV2 on ``ap`` and optionally highlight ``tag_client_mac``."""
+        self.target_ap = ap
+        self.tagged_client_mac = tag_client_mac.lower() if tag_client_mac else None
+        focus = self.focus_view
+        while focus in self.screen_stack and self.screen is not focus:
+            self.pop_screen()
+        if self.screen is not focus:
+            self.push_screen(focus)
+
     async def action_quit(self):
+        if self.array is not None:
+            self.vault.sync_known_aps(self.array.access_points)
+            self.vault.sync_probes(self.array.probes, self.array.access_points)
         self.persist_config()
         self.vault.manager.kill_all_running()
         if self.array:
             await self.array.close()
         self.exit()
 
-    def action_toggle_vault(self) -> None:
+    def action_toggle_vault(self, section: str = "aps") -> None:
         """Open the vault drawer on the AP the current screen has selected."""
         if isinstance(self.screen, VaultDrawer):
             return
@@ -517,8 +545,10 @@ class WifiteApp(App):
             ap = self.screen.selected_ap()
         elif isinstance(self.screen, FocusViewV2):
             ap = self.target_ap
-        self.push_screen(VaultDrawer(ap.bssid if ap is not None else None),
-                         callback=_on_dismiss)
+        self.push_screen(
+            VaultDrawer(ap.bssid if ap is not None else None, initial_section=section),
+            callback=_on_dismiss,
+        )
 
 _FILE_LOGGING_CONFIGURED = False  # Avoid duplicate loggers
 

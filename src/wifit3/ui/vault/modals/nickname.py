@@ -25,15 +25,25 @@ class NicknameModal(ModalScreen[Optional[str]]):
     NicknameModal #buttons Button { margin-left: 1; }
     """
 
-    def __init__(self, ssid: Optional[str], nickname: str = "") -> None:
+    def __init__(
+        self,
+        ssid: Optional[str],
+        nickname: str = "",
+        *,
+        title: str = "Set Router Nickname",
+        subtitle: Optional[str] = None,
+    ) -> None:
         super().__init__()
         self._ssid = ssid
         self._nickname = nickname
+        self._title = title
+        self._subtitle = subtitle
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label("Set Router Nickname", id="title")
-            yield Label(self._ssid or "Hidden network", markup=False, id="network")
+            yield Label(self._title, id="title")
+            label_text = self._subtitle if self._subtitle is not None else (self._ssid or "Hidden network")
+            yield Label(label_text, markup=False, id="network")
             yield Input(self._nickname, placeholder="Nickname (leave empty to clear)", id="nickname")
             with Horizontal(id="buttons"):
                 yield Button("Cancel", id="cancel")

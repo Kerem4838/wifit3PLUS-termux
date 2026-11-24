@@ -96,8 +96,9 @@ class FilterBar(HorizontalScroll):
     FilterBar > #filter-channels { margin-right: 2; }
     FilterBar > #filter-power-short-label { display: none; }
     FilterBar > #filter-power { width: 7; margin-right: 2; }
-    FilterBar > Input { width: 1fr; min-width: 16; max-width: 32; }
-    FilterBar > #filter-hide-silenced { margin-left: 2; border: none; }
+    FilterBar > Input { width: 1fr; min-width: 8; max-width: 32; }
+    FilterBar > #filter-hide-silenced { margin-left: 1; border: none; }
+    FilterBar > #filter-open-probes { min-width: 0; width: auto; margin-left: 1; margin-right: 0; }
     FilterBar Select.-expanded SelectOverlay { border: round $primary !important; background: $surface; }
     """
 
@@ -109,6 +110,9 @@ class FilterBar(HorizontalScroll):
             self.scan_filter = scan_filter
 
     class EditChannels(Message):
+        pass
+
+    class OpenProbes(Message):
         pass
 
     def __init__(self, supported_channels: List[int]) -> None:
@@ -140,6 +144,8 @@ class FilterBar(HorizontalScroll):
         yield Input(placeholder="filter by ssid…", id="filter-text", compact=True)
         yield Checkbox("Hide silenced", value=Config.hide_silenced,
                        id="filter-hide-silenced", compact=True)
+        yield Button("Probes", id="filter-open-probes", compact=True,
+                     tooltip="Open Probe Scanner (r)")
 
     def focus_text(self) -> None:
         self.query_one("#filter-text", Input).focus()
@@ -182,8 +188,11 @@ class FilterBar(HorizontalScroll):
         self._emit_scan_filter()
         self._focus_table()
 
-    def on_button_pressed(self) -> None:
-        self.post_message(self.EditChannels())
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "filter-open-probes":
+            self.post_message(self.OpenProbes())
+        else:
+            self.post_message(self.EditChannels())
 
     def on_checkbox_changed(self) -> None:
         self._emit_scan_filter()
